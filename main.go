@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
@@ -96,9 +97,10 @@ func main() {
 
 		// Too lazy to handle errors but not too lazy to write this comment which probably took more
 		// time than adding a proper error check.
-		_, _ = discord.ChannelMessageSend(config.ChannelID, fmt.Sprintf("Inzidenzwert für den %s: %d", timestamp, incidence))
+		_, _ = discord.ChannelMessageSend(config.ChannelID, fmt.Sprintf("Inzidenzwert für den %s: **%d**", timestamp, incidence))
 		if incidence >= 165 {
-			_, _ = discord.ChannelMessageSend(config.ChannelID, "Distanzunterricht, wooow")
+			mention, _ := everyone(discord)
+			_, _ = discord.ChannelMessageSend(config.ChannelID, fmt.Sprintf("%s Distanzunterricht, wooow", mention))
 		}
 	}); err != nil {
 		panic(err)
@@ -111,41 +113,55 @@ func main() {
 	<-c
 }
 
+// everyone returns the mention for everyone.
+func everyone(discord *discordgo.Session) (string, error) {
+	c, err := discord.Channel(config.ChannelID)
+	if err != nil {
+		return "", err
+	}
+
+	g, err := discord.Guild(c.GuildID)
+	if err != nil {
+		return "", err
+	}
+
+	for _, role := range g.Roles {
+		if role.Name == "everyone" {
+			return role.Mention(), nil
+		}
+	}
+
+	return "", errors.New("could not find everyone role, what the fuck")
+}
+
 // getCurrentTimestamp returns the current time, formatted using timeFmt.
 func getCurrentTimestamp() string {
 	return time.Now().Format(timeFmt)
 }
 
 // newDiscordSession returns a Discord session authenticated using the token.
-func newDiscordSession(token string) (s *discordgo.Session, err error) {
-	s, err = discordgo.New("Bot " + token)
+func newDiscordSession(token string) (*discordgo.Session, error) {
+	discord, err := discordgo.New("Bot " + token)
 	if err != nil {
-		return
+		return nil, err
 	}
-
-	if err = s.Open(); err != nil {
-		return
-	}
-
-	return
+	return discord, discord.Open()
 }
 
 // fetchData sends a GET request to endpoint for the district identified by key and parses it.
-func fetchData(client *http.Client) (r Response, err error) {
+func fetchData(client *http.Client) (*Response, error) {
 	resp, err := client.Get(fmt.Sprintf(endpoint, key))
 	if err != nil {
-		return
+		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	if err = json.Unmarshal(bytes, &r); err != nil {
-		return
-	}
-
-	return
+	r := &Response{}
+	return r, json.Unmarshal(bytes, r)
 }
